@@ -6,12 +6,11 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: testdb
-      MYSQL_USER: testuser
-      MYSQL_PASSWORD: testpassword
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./dump/ora_students.sql:/docker-entrypoint-initdb.d/ora_students.sql
 
 volumes:
   mysql_data:
