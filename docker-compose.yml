@@ -1,16 +1,25 @@
 version: '3.8'
 
 services:
-  mysql:
-    image: mysql:latest
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+    depends_on:
+      - db
+
+  db:
+    image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: testdb
     ports:
       - "3306:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./dump/ora_students.sql:/docker-entrypoint-initdb.d/ora_students.sql
-
-volumes:
-  mysql_data:
+      - ./dump:/docker-entrypoint-initdb.d
+    command: --default-authentication-plugin=mysql_native_password
