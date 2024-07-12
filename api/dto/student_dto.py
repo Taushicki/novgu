@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 
 class Student(BaseModel):
-    courсe: int
+    course: int
     group: str
     form: str
     name: str
