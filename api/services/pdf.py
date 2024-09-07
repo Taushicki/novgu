@@ -1,33 +1,15 @@
-import io
 import os
-import pymorphy2
-import inspect
 import zipfile
-from fastapi import HTTPException
-from fastapi.responses import FileResponse
-from collections import namedtuple
-from PyPDF2 import PdfReader, PdfWriter
-from reportlab.pdfgen import canvas
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfbase import pdfmetrics
-from api.dto.student_dto import Student
+
 from datetime import datetime
 
-
-ArgSpec = namedtuple("ArgSpec", "args varargs keywords defaults")
-
-
-def patched_getargspec(func):
-    spec = inspect.getfullargspec(func)
-    return ArgSpec(
-        args=spec.args,
-        varargs=spec.varargs,
-        keywords=spec.varkw,
-        defaults=spec.defaults,
-    )
-
-
-inspect.getargspec = patched_getargspec
+from docx import Document
+from docx.shared import Pt
+from docx.shared import Inches
+from docx2pdf import convert
+from PyPDF2 import PdfReader
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
 
 
 class ZIP:
@@ -65,75 +47,162 @@ class ZIP:
 
 
 class PDF:
-    def create(self, student: Student, output_file_name):
-        self.replace_words_in_pdf(
-            student,
-            "На данный момент академических задолжностей не имеет.",
-            output_file_name,
-        )
-
-    def split_into_lines(self, text: str, max_length: int = 70) -> list[str]:
-        if not text:
-            return []
-
-        lines = []
-        current_line = ""
-
-        for word in text.split():
-            if len(current_line) + len(word) + 1 <= max_length:
-                current_line += word + " "
-            else:
-                lines.append(current_line.strip())
-                current_line = word + " "
-
-        if current_line:
-            lines.append(current_line.strip())
-
-        return lines
-
-    def replace_words_in_pdf(
+    def create_certificate(
         self,
-        student: Student,
-        result: str,
         output_file_name,
+        course: str,
+        group: str,
+        forms: str,
+        fio: str,
+        fio_upper: str,
+        spec: str,
+        marks: list[tuple],
+        debt: list[str] = None,
     ) -> None:
-        existing_pdf = open("base.pdf", "rb")
-        output = PdfWriter()
+        # Словарь для замены слов
+        replacing = {
+            "date": datetime.now().strftime("%d.%m.%Y"),
+            "course": course,
+            "group": group,
+            "forms": forms,
+            "fio": fio,
+            "fio_upper": fio_upper.upper(),
+            "spec": spec,
+            "result": "На данный момент академических задолженностей не имеет.",
+            "table_list_count": "1",
+        }
 
-        new_pdf = open(output_file_name, "wb")
+        # Добавление задолженностей
+        if debt:
+            replacing["result"] = (
+                "На данный момент имеет академические задолженности по дисциплинам:"
+            )
+            for subject in debt:
+                replacing["result"] += f" {subject},"
+            replacing["result"] = replacing["result"][:-1]
 
-        page = PdfReader(existing_pdf).pages[0]
+        # Открытие документа
+        doc = Document("base.docx")
 
-        packet = io.BytesIO()
-        can = canvas.Canvas(packet)
+        # Добавление заголовков для таблицы
+        marks.insert(0, ("Семестр", "Дисциплина", "", "Рейтинг", "Оценка"))
+        # Добавление таблицы с дисциплинами
+        table = doc.add_table(rows=len(marks), cols=5)
+        # Установка ширины колонок
+        table.columns[0].width = Inches(0.75)
+        table.columns[1].width = Inches(10)
+        table.columns[2].width = Inches(0.5)
+        table.columns[3].width = Inches(0.625)
+        table.columns[4].width = Inches(0.625)
+        for column in table.columns:
+            for cell in column.cells:
+                cell.width = column.width
+        # Заполнение таблицы данными и настройка шрифта
+        for row_idx, row_data in enumerate(marks):
+            for col_idx, item in enumerate(row_data):
+                cell = table.cell(row_idx, col_idx)
+                cell.text = item
+                # Установка шрифта для ячейки
+                for paragraph in cell.paragraphs:
+                    run = paragraph.runs[0]
+                    run.font.name = "Calibri"
+                    run.font.size = Pt(10)
+        # Установка стиля таблицы
+        table.style = "Table Grid"
+        # Определение кол-ва листов приложения
+        doc.save("updated_base.docx")
+        convert("updated_base.docx", "temp.pdf")
+        with open("temp.pdf", "rb") as f:
+            reader = PdfReader(f)
+            replacing["table_list_count"] = len(reader.pages) - 1
+        os.remove("temp.pdf")
 
-        pdfmetrics.registerFont(TTFont("TimesNewRoman", "times.ttf"))
+        # Замена слов
+        paragraphs = list(doc.paragraphs)
+        for t in doc.tables:
+            for row in t.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        paragraphs.append(paragraph)
+        for p in paragraphs:
+            for key, val in replacing.items():
+                key_name = "${{{}}}".format(key)
+                if key_name in p.text:
+                    inline = p.runs
+                    started = False
+                    key_index = 0
+                    found_runs = list()
+                    found_all = False
+                    replace_done = False
+                    for i in range(len(inline)):
 
-        can.setFont("TimesNewRoman", 14)
+                        if key_name in inline[i].text and not started:
+                            found_runs.append(
+                                (i, inline[i].text.find(key_name), len(key_name))
+                            )
+                            text = inline[i].text.replace(key_name, str(val))
+                            inline[i].text = text
+                            replace_done = True
+                            found_all = True
+                            break
 
-        rows = self.split_into_lines(
-            f"Новгородский государственный университет имени Ярослава Мудрого предоставляет сведения об успеваемости на {datetime.now().date().strftime('%d.%m.%Y')}, студента {student.course} курса группы {student.group} {self.change_morphy(student.form)} формы обучения {self.change_morphy(student.name).title()} по специальности {student.spec}."
-        )
-        can.drawString(120, 513, rows[0])
-        y = 497
-        for row in rows[1:]:
-            can.drawString(85, y, row)
-            y -= 16
-        can.drawString(120, y, result)
-        can.save()
+                        if key_name[key_index] not in inline[i].text and not started:
+                            continue
 
-        packet.seek(0)
-        page.merge_page(PdfReader(packet).pages[0])
+                        if (
+                            key_name[key_index] in inline[i].text
+                            and inline[i].text[-1] in key_name
+                            and not started
+                        ):
+                            start_index = inline[i].text.find(key_name[key_index])
+                            check_length = len(inline[i].text)
+                            for text_index in range(start_index, check_length):
+                                if inline[i].text[text_index] != key_name[key_index]:
+                                    break
+                            if key_index == 0:
+                                started = True
+                            chars_found = check_length - start_index
+                            key_index += chars_found
+                            found_runs.append((i, start_index, chars_found))
+                            if key_index != len(key_name):
+                                continue
+                            else:
+                                found_all = True
+                                break
 
-        output.add_page(page)
-        output.write(new_pdf)
+                        if (
+                            key_name[key_index] in inline[i].text
+                            and started
+                            and not found_all
+                        ):
+                            chars_found = 0
+                            check_length = len(inline[i].text)
+                            for text_index in range(0, check_length):
+                                if inline[i].text[text_index] == key_name[key_index]:
+                                    key_index += 1
+                                    chars_found += 1
+                                else:
+                                    break
+                            found_runs.append((i, 0, chars_found))
+                            if key_index == len(key_name):
+                                found_all = True
+                                break
 
-        existing_pdf.close()
-        new_pdf.close()
+                    if found_all and not replace_done:
+                        for i, item in enumerate(found_runs):
+                            index, start, length = [t for t in item]
+                            if i == 0:
+                                text = inline[index].text.replace(
+                                    inline[index].text[start : start + length], str(val)
+                                )
+                                inline[index].text = text
+                            else:
+                                text = inline[index].text.replace(
+                                    inline[index].text[start : start + length], ""
+                                )
+                                inline[index].text = text
 
-    def change_morphy(self, string: str):
-        morph = pymorphy2.MorphAnalyzer()
-        name = ""
-        for i in string.split(" "):
-            name += morph.parse(i)[0].inflect({"gent"}).word + " "
-        return name[:-1]
+        # Сохранение изменений
+        doc.save("updated_base.docx")
+        convert("updated_base.docx", output_file_name)
+        os.remove("updated_base.docx")
