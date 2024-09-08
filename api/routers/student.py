@@ -13,8 +13,8 @@ async def get_progress(manid: int):
         student_data = await StudentUTILS.get_student_by_manid(manid)
         for numb, student in enumerate(student_data):
             student_subjects = await StudentUTILS.get_subjects_by_manid(int(student["STD_ID"]))
-            StudentUTILS.create_pdf(student, student_subjects, f"{student['MAN_ID']}_{student['STD_ID']}.pdf")
-            files.append(f"{student['MAN_ID']}_{student['STD_ID']}.pdf")
+            StudentUTILS.create_pdf(student, student_subjects, f"{numb}.pdf")
+            files.append(f"{numb}.pdf")
         return ZIP.create_zip(files)
     except Exception as error:
         return {"message": f"Error: {error}"}

@@ -61,7 +61,7 @@ class UTILS:
             )
         last_semest = subjects[-1][0]
         for subject in subjects:
-            if subject[0] == last_semest and int(subject[4]) <= 2:
+            if subject[0] == last_semest and int(subject[4]) <= 2 if subject[4].isdigit() else False:
                 debt.append(subject[1])
         PDF().create_certificate(
             output_file_name,

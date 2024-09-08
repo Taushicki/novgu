@@ -16,7 +16,7 @@ class ZIP:
     @staticmethod
     def create_zip(files: list):
         if len(files) > 1:
-            zip_file_name = "output.zip"
+            zip_file_name = "debt.zip"
             with zipfile.ZipFile(zip_file_name, "w") as zipf:
                 for file in files:
                     zipf.write(file)
